@@ -1,39 +1,38 @@
 # Diseño de base de datos
 
 ## Estado
-- **Implementado:** ninguno. No existen migraciones Flyway, scripts SQL, entidades JPA ni configuración de conexión a PostgreSQL en el repositorio.
-- **Propuesto:** PostgreSQL como base relacional, esquema multitenant con `tenant_id`, migraciones versionadas con Flyway e integridad referencial.
-- **No verificable:** índices reales, planes de ejecución, bloqueos en runtime y desempeño (sin esquema/ejecución).
 
-## Principios de diseño (propuestos)
+- **Implementado:** PostgreSQL 16 con Flyway (`V1`–`V6`), entidades JPA, datasource configurado y seed demo `V100` para el perfil `dev`.
+- **Aislamiento:** `tenant_id` en datos de negocio y filtrado explícito en repositorios/servicios.
+- **Sin RLS:** el MVP usa aislamiento lógico; RLS queda en el backlog.
 
-- **Multitenancy:** tablas de negocio incluyen `tenant_id` (FK a `tenant`) y todas las consultas se filtran por tenant desde el contexto autenticado.
-- **Tipos financieros:** importes con `NUMERIC(p,s)` en BD y `BigDecimal` en Java; **nunca** `float`/`double`.
-- **Integridad:** claves primarias, foráneas, restricciones `NOT NULL`, `UNIQUE`, `CHECK` y estados controlados.
-- **Inmutabilidad operativa:** no eliminación física de movimientos financieros; correcciones mediante operaciones/ajustes trazables.
-- **Concurrencia:** operaciones financieras en transacciones ACID con bloqueos apropiados (p. ej. `SELECT ... FOR UPDATE` sobre cuentas afectadas, a definir).
-- **Auditoría y trazabilidad:** registro de acciones/eventos y correlación.
+## Principios
 
-## Entidades y modelo lógico (propuesto)
+- **Multitenancy:** tablas de negocio incluyen `tenant_id` y todas las consultas se filtran por el tenant autenticado.
+- **Tipos financieros:** `NUMERIC(19,4)` para importes y `NUMERIC(19,8)` para tasas; `BigDecimal` en Java. Nunca `float`/`double`.
+- **Integridad:** PK, FK, `NOT NULL`, `UNIQUE`, `CHECK` e índices.
+- **Inmutabilidad operativa:** no se eliminan físicamente movimientos financieros.
+- **Concurrencia:** transacciones ACID y bloqueos pesimistas sobre cuentas.
+- **Auditoría:** `audit_logs` y outbox en la misma transacción de negocio.
 
-> Campos, tipos y nombres son una **propuesta inicial**; deben ajustarse a requisitos confirmados antes de crear migraciones.
+## Entidades implementadas
 
-| Entidad | Propósito | Campos principales (propuestos) | Relaciones / restricciones | Índices recomendados |
-|---|---|---|---|---|
-| **Tenant** | Institución/organización | `id` (PK), `name`, `code`/`slug`, `status`, `created_at`, `updated_at` | Raíz del aislamiento | `UNIQUE(code/slug)` |
-| **User** | Usuario del sistema por tenant | `id` (PK), `tenant_id` (FK), `username`/`email`, `password_hash`, `status`, `created_at`, `updated_at` | FK `tenant`; único por tenant | `UNIQUE(tenant_id,email)` , `INDEX(tenant_id)` |
-| **Role** | Roles y/o permisos | `id` (PK), `tenant_id` (FK, si es por tenant) o global, `name`, `permissions`/`scope` | N:N con `User` (tabla intermedia propuesta) | `UNIQUE(tenant_id,name)` |
-| **Customer** | Cliente final de la institución | `id` (PK), `tenant_id` (FK), `document_type`, `document_number`, `full_name`, `status`, `created_at` | FK `tenant`; único por tenant | `UNIQUE(tenant_id,document_number)` , `INDEX(tenant_id)` |
-| **Account** | Cuenta bancaria | `id` (PK), `tenant_id` (FK), `customer_id` (FK), `account_number`, `currency`, `balance NUMERIC`, `available_balance NUMERIC` (opcional), `status`, `version` (optimista, opcional), `created_at` | FK `tenant`, `customer`; saldo coherente | `UNIQUE(tenant_id,account_number)` , `INDEX(tenant_id,customer_id)` , `INDEX(tenant_id,status)` |
-| **Transaction** | Operación/movimiento financiero | `id` (PK), `tenant_id` (FK), `type` (DEPOSIT/WITHDRAWAL/TRANSFER), `status`, `amount NUMERIC`, `currency`, `fee NUMERIC`, `exchange_rate NUMERIC` (si aplica), `source_account_id` (FK), `destination_account_id` (FK), `reference`, `created_at` | FK `tenant`, cuentas; integridad por tipo | `INDEX(tenant_id,created_at)` , `INDEX(tenant_id,source_account_id)` , `INDEX(tenant_id,destination_account_id)` |
-| **IdempotencyRecord** | Clave y resultado de operación idempotente | `id` (PK), `tenant_id` (FK), `idempotency_key`, `operation`, `request_hash`, `response_payload`/`status`, `resource_id`, `status` (IN_PROGRESS/COMPLETED/FAILED), `created_at`, `expires_at` | Única por tenant+clave (+operación, a definir) | `UNIQUE(tenant_id,idempotency_key,operation)` |
-| **TenantSettings** | Configuración por tenant | `id` (PK), `tenant_id` (FK), `key`/config, `value`, `updated_at` | FK `tenant` | `UNIQUE(tenant_id,key)` o 1:1 según diseño |
-| **ExchangeRate** | Tasas de cambio por tenant | `id` (PK), `tenant_id` (FK), `from_currency`, `to_currency`, `rate NUMERIC`, `effective_from`, `effective_to`/`active`, `created_at` | FK `tenant`; vigencia | `INDEX(tenant_id,from_currency,to_currency,effective_from)` |
-| **AuditLog** | Trazabilidad de acciones | `id` (PK), `tenant_id` (FK), `actor_user_id`, `action`, `resource_type`, `resource_id`, `metadata` (JSONB), `correlation_id`, `created_at` | FK `tenant` | `INDEX(tenant_id,created_at)` , `INDEX(correlation_id)` |
-| **Webhook** | Configuración de endpoints externos | `id` (PK), `tenant_id` (FK), `url`, `events`, `secret`/firma, `status`, `created_at` | FK `tenant` | `INDEX(tenant_id,status)` |
-| **OutboxEvent** | Eventos pendientes/enviados (patrón Outbox) | `id` (PK), `tenant_id` (FK), `aggregate_type`, `aggregate_id`, `event_type`, `payload` (JSONB), `status`, `attempts`, `next_retry_at`, `created_at`, `processed_at` | Persistido en misma transacción de negocio | `INDEX(status,next_retry_at)` , `INDEX(tenant_id,created_at)` |
+| Entidad/Tabla | Propósito | Campos/restricciones principales |
+|---|---|---|
+| `tenants` | Institución | `id`, `code` único, `name`, branding, `status` |
+| `users` | Usuario por tenant | `tenant_id`, `email`, `password_hash`, `role`, `status`; único `(tenant_id,email)` |
+| `customers` | Cliente final | `tenant_id`, documento, nombre, estado; único por tenant |
+| `accounts` | Cuenta | `tenant_id`, `customer_id`, `account_number`, `currency`, `balance NUMERIC(19,4)`, `status`; `CHECK (balance >= 0)` |
+| `transactions` | Cabecera financiera | `tenant_id`, tipo, estado, importe, moneda, comisión, tasa, cuentas origen/destino |
+| `transaction_entries` | Movimientos contables | Cuenta, débito/crédito, moneda, importe; permiten reconstruir saldos |
+| `idempotency_records` | Idempotencia | Único `(tenant_id, operation, idempotency_key)`, hash y snapshot de respuesta |
+| `tenant_settings` | Configuración | Clave/valor por tenant |
+| `exchange_rates` | Tasas | Par de monedas, tasa `NUMERIC(19,8)`, vigencia |
+| `audit_logs` | Auditoría | Actor, tenant, acción, entidad, payload, correlation ID |
+| `webhook_endpoints` | Destinos | URL, eventos, secreto, estado |
+| `webhook_events` | Outbox | Evento, payload, estado, intentos, próxima reintento |
 
-## Diagrama entidad-relación (propuesto)
+## Diagrama entidad-relación
 
 ```mermaid
 erDiagram
@@ -45,26 +44,42 @@ erDiagram
   TENANT ||--o{ TENANT_SETTINGS : configura
   TENANT ||--o{ EXCHANGE_RATE : define
   TENANT ||--o{ AUDIT_LOG : registra
-  TENANT ||--o{ WEBHOOK : configura
-  TENANT ||--o{ OUTBOX_EVENT : genera
+  TENANT ||--o{ WEBHOOK_ENDPOINT : configura
+  TENANT ||--o{ WEBHOOK_EVENT : genera
   CUSTOMER ||--o{ ACCOUNT : posee
-  ACCOUNT ||--o{ TRANSACTION : origina_o_recibe
+  ACCOUNT ||--o{ TRANSACTION_ENTRY : registra
+  TRANSACTION ||--o{ TRANSACTION_ENTRY : contiene
   USER ||--o{ AUDIT_LOG : ejecuta
 ```
 
-## Migraciones (Flyway) — propuesto
-- Ubicación: `backend/src/main/resources/db/migration/` (p. ej. `V1__init_schema.sql`).
-- Versionado incremental, repetible solo cuando aplique (`R__`), y sin edición de migraciones aplicadas.
-- **Estado:** no hay migraciones en el repositorio.
+## Migraciones Flyway
 
-## Consideraciones de concurrencia y consistencia (propuestas)
-- Transferencias y movimientos de saldo: transacción única con bloqueos de fila sobre cuentas involucradas en orden determinista (para reducir deadlocks).
-- Validar saldo y estado de cuenta dentro de la misma transacción.
-- Usar restricciones `CHECK` (p. ej. saldo >= 0 si no se permite descubierto) según política confirmada.
-- `IdempotencyRecord`: restricción única para evitar duplicados concurrentes; manejo de estado `IN_PROGRESS` para solicitudes simultáneas.
+Ubicación: `backend/src/main/resources/db/migration/`.
 
-## Decisiones pendientes
-- Precisión/escala `NUMERIC` (p. ej. 19,4 / 19,6) y reglas de redondeo.
-- Política de descubierto (saldos negativos) y cuentas multidivisa.
-- Modelado exacto de roles/permisos (RBAC) y relación usuario-rol.
-- Estrategia de particionado/retención para `audit_log` y `outbox_event` (volumen futuro).
+- `V1`–`V6`: esquema completo para todos los perfiles.
+- `V100__dev_seed.sql`: solo `db/dev` y perfil `dev`.
+- Migraciones inmutables una vez aplicadas.
+- `ddl-auto=validate`; Flyway es la única fuente del esquema.
+
+## Concurrencia y consistencia
+
+- Transferencias y movimientos de saldo en una única transacción.
+- Bloqueo `PESSIMISTIC_WRITE` sobre cuentas involucradas.
+- Orden determinista de bloqueo para reducir deadlocks.
+- Validación de saldo y estado dentro de la transacción.
+- Idempotencia con advisory lock y restricción única.
+
+## Decisiones implementadas
+
+- Precisión/escala: `NUMERIC(19,4)` y `NUMERIC(19,8)`.
+- Sin descubierto en el MVP (`balance >= 0`).
+- Roles como enum (`PLATFORM_ADMIN`, `TENANT_ADMIN`, `OPERATOR`, `AUDITOR`), sin tabla N:N.
+- Retención/particionado: pendiente.
+
+## Pendiente
+
+- RLS de PostgreSQL.
+- Particionado/retención de auditoría y outbox.
+- Conciliación contable y cierre diario.
+- Cifrado de columnas sensibles.
+- Planes de ejecución y tuning con datos reales.

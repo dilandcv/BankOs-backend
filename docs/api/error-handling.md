@@ -1,10 +1,12 @@
 # Manejo de errores
 
 ## Estado
-- **Implementado:** ninguno. No existe `@ControllerAdvice`, jerarquía de excepciones ni formato estándar en código.
-- **Propuesto:** manejo global y consistente de errores con trazabilidad (`correlation_id`), códigos de negocio estables y mapeo HTTP claro.
 
-## Formato estándar de error (propuesto)
+- **Implementado:** `GlobalExceptionHandler` (`@RestControllerAdvice`), `ApiException`, `ErrorCode` y sobre de error con `correlation_id`.
+- **Implementado:** validación Jakarta por campo, header faltante, JSON inválido y violaciones de integridad.
+- **Pendiente:** catálogo de errores de infraestructura (timeouts, webhooks) y traducción de mensajes.
+
+## Formato estándar
 
 ```json
 {
@@ -16,72 +18,78 @@
 }
 ```
 
-- `code`: identificador estable de negocio/técnico (para clientes y soporte).
-- `message`: descripción legible y segura (sin filtrar detalles sensibles).
-- `data`: `null` o detalle estructurado (p. ej. errores de validación por campo).
-- `correlation_id`: mismo valor propagado desde `X-Correlation-ID` o generado por el servidor.
+- `code`: identificador estable (`ErrorCode`).
+- `message`: mensaje seguro para el cliente.
+- `data`: `null` o detalle estructurado.
+- `correlation_id`: el mismo de `X-Correlation-ID` o uno generado por el servidor.
 
-## Ejemplo de error de validación (propuesto)
+## Error de validación
 
 ```json
 {
   "success": false,
   "code": "VALIDATION_ERROR",
-  "message": "La solicitud contiene datos inválidos",
+  "message": "Datos de entrada inválidos",
   "data": {
-    "fields": [
-      { "field": "amount", "message": "debe ser mayor que 0" },
-      { "field": "source_account_id", "message": "no debe ser nulo" }
-    ]
+    "amount": "El monto debe ser mayor o igual a 0.0001",
+    "currency": "La moneda debe tener 3 letras"
   },
-  "correlation_id": "550e8400-e29b-41d4-a716-446655440000"
+  "correlation_id": "uuid"
 }
 ```
 
-## Mapeo HTTP y códigos (propuesto)
+## Catálogo implementado
 
-| HTTP | Código (ejemplo) | Escenario |
+| HTTP | Código | Escenario |
 |---|---|---|
-| 400 | `VALIDATION_ERROR`, `BAD_REQUEST` | JSON inválido, campos faltantes/formato incorrecto |
-| 401 | `UNAUTHORIZED`, `INVALID_TOKEN`, `TOKEN_EXPIRED` | Sin autenticación o JWT inválido/expirado |
-| 403 | `FORBIDDEN`, `TENANT_ACCESS_DENIED` | Sin rol/permiso o recurso fuera del tenant |
-| 404 | `RESOURCE_NOT_FOUND` | Recurso inexistente o no visible en el tenant |
-| 409 | `INSUFFICIENT_FUNDS`, `ACCOUNT_INACTIVE`, `IDEMPOTENCY_CONFLICT`, `DUPLICATE_REQUEST_IN_PROGRESS` | Conflicto de negocio/estado/idempotencia |
-| 422 | `BUSINESS_RULE_VIOLATION` | Regla de negocio no satisfecha (si se adopta) |
-| 500 | `INTERNAL_ERROR` | Error no controlado (mensaje genérico) |
+| 400 | `VALIDATION_ERROR` | Campos inválidos, JSON ilegible o header incorrecto. |
+| 400 | `IDEMPOTENCY_KEY_REQUIRED` | Falta `Idempotency-Key` en operación financiera. |
+| 401 | `INVALID_CREDENTIALS` | Login con tenant/usuario/contraseña inválidos. |
+| 401 | `UNAUTHORIZED` | Token ausente, inválido o expirado. |
+| 403 | `FORBIDDEN` | Rol insuficiente. |
+| 403 | `TENANT_ACCESS_DENIED` | Acceso a recursos de otra institución. |
+| 404 | `TENANT_NOT_FOUND` | Institución inexistente. |
+| 404 | `USER_NOT_FOUND` | Usuario inexistente en el tenant. |
+| 404 | `CUSTOMER_NOT_FOUND` | Cliente inexistente en el tenant. |
+| 404 | `ACCOUNT_NOT_FOUND` | Cuenta inexistente en el tenant. |
+| 404 | `TRANSACTION_NOT_FOUND` | Transacción inexistente en el tenant. |
+| 404 | `AUDIT_LOG_NOT_FOUND` | Registro de auditoría inexistente. |
+| 409 | `CONFLICT` | Duplicado o estado incompatible. |
+| 409 | `IDEMPOTENCY_CONFLICT` | Misma llave con cuerpo distinto. |
+| 409 | `IDEMPOTENCY_IN_PROGRESS` | Operación concurrente con la misma llave. |
+| 422 | `INSUFFICIENT_FUNDS` | Saldo insuficiente. |
+| 422 | `ACCOUNT_INACTIVE` | Cuenta no activa. |
+| 422 | `ACCOUNT_BLOCKED` | Cuenta bloqueada. |
+| 422 | `SAME_ACCOUNT_TRANSFER` | Origen y destino iguales. |
+| 422 | `CURRENCY_NOT_SUPPORTED` | Moneda con formato inválido. |
+| 422 | `CURRENCY_MISMATCH` | Moneda distinta a la cuenta. |
+| 422 | `EXCHANGE_RATE_NOT_FOUND` | No hay tasa configurada. |
+| 422 | `INVALID_AMOUNT` | Monto no positivo o conversión demasiado pequeña. |
+| 429 | `RATE_LIMITED` | Reservado; rate limiting no implementado. |
+| 500 | `INTERNAL_ERROR` | Error no controlado; mensaje genérico. |
 
-> Catálogo definitivo y mapeos exactos **pendientes de confirmación**.
+## Idempotencia
 
-## Errores de negocio financieros (propuestos)
-
-| Código | Descripción | Nota |
-|---|---|---|
-| `INSUFFICIENT_FUNDS` | Saldo insuficiente para la operación | Validar en transacción atómica |
-| `ACCOUNT_INACTIVE` / `ACCOUNT_BLOCKED` | Cuenta no operable | No permitir débito/crédito según política |
-| `CURRENCY_MISMATCH` | Moneda inválida para la operación | Según reglas de cuenta/conversión |
-| `EXCHANGE_RATE_NOT_FOUND` | No hay tasa vigente configurada | Configuración por tenant |
-| `NEGATIVE_BALANCE_NOT_ALLOWED` | Operación dejaría saldo negativo | Salvo política de descubierto confirmada |
-| `INVALID_TRANSFER` | Origen/destino inválidos (mismo recurso, estado, etc.) | Regla de negocio |
-
-## Idempotencia (errores y respuestas, propuesto)
-
-| Caso | Comportamiento esperado |
+| Caso | Comportamiento |
 |---|---|
-| Misma `Idempotency-Key` y mismo payload ya completado | Devolver el **mismo resultado** previamente registrado (código HTTP y cuerpo consistentes) |
-| Misma `Idempotency-Key` y payload diferente | Rechazar con conflicto (p. ej. 409 `IDEMPOTENCY_CONFLICT`) |
-| Solicitud simultánea con misma clave | Una procesa; las demás esperan o reciben estado "en progreso" según diseño (409/202 a definir) |
-| Reintento tras fallo transitorio | Permitir reintento seguro según estado persistido en PostgreSQL |
+| Misma llave + mismo body, ya completado | Devuelve el mismo `ApiResponse` y `data` originales. |
+| Misma llave + body distinto | `409 IDEMPOTENCY_CONFLICT`. |
+| Solicitud concurrente con la misma llave | Advisory lock de PostgreSQL; la segunda espera o recibe `409 IDEMPOTENCY_IN_PROGRESS`. |
+| Fallo transitorio | La transacción revierte; el registro `IN_PROGRESS` no queda completado si falla la transacción. |
 
-> PostgreSQL es la fuente de verdad del registro de idempotencia; Redis solo complementario.
+El hash del request y el snapshot de respuesta se guardan en PostgreSQL (`idempotency_records`). Redis no se usa como fuente de verdad.
 
-## Manejo global de excepciones (propuesto)
+## Manejo global
 
-- `@ControllerAdvice` para traducir excepciones a respuestas estándar.
-- Excepciones de dominio (p. ej. saldo insuficiente, recurso no encontrado, acceso denegado) con código y HTTP explícitos.
-- Excepciones no controladas: registrar detalle internamente con `correlation_id` y responder `500 INTERNAL_ERROR` sin exponer stack traces.
-- Validación Jakarta: agregar errores de campo en `data.fields`.
+- `ApiException` → `ErrorCode.status()` y `ApiResponse.error`.
+- `MethodArgumentNotValidException` / `ConstraintViolationException` → `400 VALIDATION_ERROR` con errores por campo.
+- `MissingRequestHeaderException` → `400 IDEMPOTENCY_KEY_REQUIRED` para operaciones financieras.
+- `HttpMessageNotReadableException` → `400 VALIDATION_ERROR`.
+- `DataIntegrityViolationException` → `409 CONFLICT` (sin exponer SQL).
+- `Exception` → log interno con stack trace y `500 INTERNAL_ERROR` genérico.
 
-## Seguridad en mensajes de error
-- No revelar si un recurso pertenece a otro tenant (preferir 404/403 según política, sin fuga de existencia).
-- No exponer información sensible (hashes, secretos, consultas SQL, trazas).
-- Mensajes claros pero genéricos en autenticación cuando corresponda (`401`/`403`).
+## Seguridad en mensajes
+
+- No se exponen hashes, secretos, SQL ni stack traces.
+- Los recursos de otro tenant responden `404` para no revelar existencia.
+- El login usa un mensaje genérico para no facilitar enumeración de tenants/usuarios.

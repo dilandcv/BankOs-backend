@@ -1,0 +1,20 @@
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/dev
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.bankos: DEBUG
+
+springdoc:
+  swagger-ui:
+    enabled: true

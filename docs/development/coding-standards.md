@@ -1,8 +1,8 @@
 # Estándares de codificación
 
 ## Estado
-- **Implementado:** no verificable (no existe código backend).
-- **Propuesto:** convenciones obligatorias para Java/Spring Boot, PostgreSQL y Git a aplicar desde la implementación inicial.
+- **Implementado:** convenciones aplicadas al backend actual (Java 21, Spring Boot 3.5, módulos, JWT, Flyway, BigDecimal y pruebas).
+- **Pendiente:** umbrales de cobertura, análisis estático obligatorio y revisión automatizada en CI.
 
 ## Java y Spring Boot
 
@@ -26,7 +26,7 @@
 
 ### Dinero y precisión
 - **`BigDecimal`** para todos los importes/cálculos monetarios; **prohibido** `float`/`double`.
-- Definir escala y modo de redondeo explícitos (`RoundingMode`) según política acordada (pendiente).
+- Definir escala y modo de redondeo explícitos: **escala 4**, `RoundingMode.HALF_UP` (`MoneyUtils`).
 - No usar tipos de punto flotante en comparaciones de saldo.
 
 ### Seguridad y multitenancy
@@ -39,10 +39,10 @@
 - Evitar N+1; definir fetch/consultas según necesidad.
 - Operaciones financieras con control de concurrencia (bloqueos/estrategia definida) y atomicidad.
 
-### Ejemplo ilustrativo (propuesto)
+### Ejemplo ilustrativo
 
 ```java
-// Ejemplo de servicio (propuesto, no implementado)
+// Patrón usado por los servicios financieros
 @Transactional
 public TransferResult transfer(UUID tenantId, TransferCommand cmd) {
     Account source = accountRepository.findByIdAndTenantIdForUpdate(cmd.sourceId(), tenantId)
@@ -59,7 +59,7 @@ public TransferResult transfer(UUID tenantId, TransferCommand cmd) {
 - Migraciones con **Flyway** en `src/main/resources/db/migration/`, versionadas (`V__`), inmutables una vez aplicadas.
 - No usar `ddl-auto=create/update` en entornos compartidos; preferir `validate` con esquema gestionado por Flyway.
 
-## Pruebas (convenciones propuestas)
+## Pruebas
 - Nombres descriptivos por comportamiento/caso.
 - Pruebas unitarias para cálculos (comisiones, conversión, validaciones) y servicios.
 - Pruebas de integración para repositorios, seguridad, Flyway, PostgreSQL/Redis.
@@ -88,7 +88,7 @@ public TransferResult transfer(UUID tenantId, TransferCommand cmd) {
 
 Ejemplos: `feat: add transfer service with tenant validation`, `docs: document backend idempotency strategy`.
 
-## Revisión y calidad (propuesto)
+## Revisión y calidad
 - PRs pequeños y enfocados; descripción clara del cambio y evidencia de pruebas.
 - Verificar cumplimiento de seguridad financiera y multitenancy antes de aprobar.
 - No introducir secretos ni configuraciones dependientes del frontend.

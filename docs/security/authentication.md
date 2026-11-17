@@ -1,72 +1,106 @@
 # Autenticación
 
 ## Estado
-- **Implementado:** ninguno. No existe Spring Security, filtros JWT, endpoints de autenticación ni gestión de credenciales en el backend.
-- **Propuesto:** autenticación stateless mediante JWT, credenciales validadas en backend y autorización basada en roles/permisos.
 
-## Objetivos (propuestos)
-- Verificar identidad de usuarios por tenant.
-- Emitir y validar JWT con información mínima necesaria: identidad de usuario, `tenant_id`, roles y expiración.
-- Proteger endpoints mediante Spring Security y reglas de autorización.
-- Almacenar contraseñas con **hashing seguro** (p. ej. BCrypt o Argon2, a definir), nunca en texto plano.
+- **Implementado:** Spring Security, JWT HS256, login por institución, `/auth/me`, BCrypt strength 12, RBAC y auditoría de login.
+- **Pendiente:** refresh tokens, revocación centralizada, rotación de secretos, rate limiting y bloqueo por intentos fallidos.
 
-## Flujo de autenticación (propuesto)
+## Modelo multi-banco (Opción A)
+
+Cada usuario pertenece a una institución (tenant). El login se hace **una vez por banco**:
+
+```http
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{
+  "tenant_code": "BANCO_HORIZONTE",
+  "email": "admin@horizonte.com",
+  "password": "Admin123!"
+}
+```
+
+La app puede guardar un token por `tenant_code` y cambiar de institución sin volver a autenticarse. El backend no mantiene una sesión global ni una tabla de sesiones en el MVP: cada JWT representa una sesión independiente atada a su tenant.
+
+Ver [Modelo multi-banco](../../../docs/architecture/multi-bank-model.md).
+
+## Flujo implementado
 
 ```mermaid
 sequenceDiagram
   participant C as Cliente HTTP
-  participant A as Auth Controller/Service
-  participant U as Users/Tenant Store
-  participant J as JWT Provider
+  participant A as AuthController / AuthService
+  participant U as TenantRepository / UserRepository
+  participant J as JwtService
+  participant DB as audit_logs
 
-  C->>A: POST /api/v1/auth/login (credenciales + contexto tenant)
-  A->>U: Validar tenant y credenciales (hash)
-  U-->>A: Usuario, roles, tenant
-  A->>J: Generar JWT (sub, tenant, roles, exp)
-  J-->>A: access_token
-  A-->>C: 200 {access_token, token_type, expires_in}
+  C->>A: POST /api/v1/auth/login (tenant_code, email, password)
+  A->>U: Buscar tenant activo por code
+  A->>U: Buscar usuario activo por tenant_id + email
+  A->>A: BCrypt.matches(password)
+  A->>J: Emitir JWT (sub, tenant_id, email, roles, iss, jti)
+  A->>DB: Registrar AUTH_LOGIN
+  A-->>C: access_token + user + tenant (branding)
 
-  C->>A: GET /api/v1/auth/me (Authorization: Bearer)
-  A->>J: Validar firma/expiración
-  J-->>A: Claims autenticados
-  A-->>C: 200 datos del usuario/contexto
+  C->>A: GET /api/v1/auth/me (Bearer)
+  A->>J: Validar firma, issuer, expiración y tenant_id
+  A-->>C: user + tenant actuales
 ```
 
-## JWT (propuesto)
+## JWT
 
-### Claims esperados
-- `sub` / identificador de usuario.
-- `tenant_id` (o claim equivalente) — **origen de confianza** para el aislamiento.
-- `roles` / autoridades.
-- `iat`, `exp` (y opcional `jti` para revocación/seguimiento).
+### Claims
+
+| Claim | Uso |
+|---|---|
+| `sub` | ID del usuario (`users.id`). |
+| `tenant_id` | Tenant del usuario. **Fuente de verdad** para el aislamiento. |
+| `email` | Email del usuario. |
+| `roles` | Lista de roles: `PLATFORM_ADMIN`, `TENANT_ADMIN`, `OPERATOR`, `AUDITOR`. |
+| `iss` | Emisor configurado (`app.jwt.issuer`, por defecto `bankos`). |
+| `jti` | Identificador único del token. |
+| `iat`, `exp` | Emisión y expiración. |
 
 ### Reglas
-- Firmar con secreto/clave robusta inyectada por entorno (`JWT_SECRET`/par de claves), **nunca** hardcodeada ni commiteada.
-- Validar firma, expiración, emisor/audiencia (si se definen) y presencia de tenant.
-- Rechazar tokens inválidos, expirados o mal formados con `401`.
-- Tiempo de expiración configurable; estrategia de refresh tokens **pendiente** de definición.
 
-## Endpoints (propuestos)
+- Firma HS256 con `JWT_SECRET` inyectado por entorno. Mínimo recomendado: 32 bytes aleatorios.
+- El validador exige `tenant_id` no vacío y `iss` correcto.
+- Tokens inválidos o expirados devuelven `401 UNAUTHORIZED` con el sobre de error.
+- La expiración se configura con `JWT_EXPIRATION_MS` (por defecto 1 hora).
+- No hay refresh token en el MVP; al expirar, el cliente debe volver a hacer login para ese banco.
 
-| Método | Endpoint | Descripción | Estado |
-|---|---|---|---|
-| POST | `/api/v1/auth/login` | Autentica y retorna JWT | Pendiente |
-| GET | `/api/v1/auth/me` | Retorna identidad y contexto del token | Pendiente |
+## Endpoints
 
-## Autorización (propuesta)
-- Spring Security con filtro de autenticación JWT antes de la autorización.
-- Reglas por endpoint y por rol (RBAC), con denegación por defecto en recursos protegidos.
-- Validaciones adicionales en servicio para pertenencia de recursos al tenant.
+| Método | Endpoint | Descripción | Auth | Estado |
+|---|---|---|---|---|
+| `POST` | `/api/v1/auth/login` | Autentica por institución y retorna JWT | Público | Implementado |
+| `GET` | `/api/v1/auth/me` | Retorna usuario y tenant del token | Bearer | Implementado |
+
+## Autorización
+
+- `SecurityConfig` configura OAuth2 Resource Server con `JwtDecoder` Nimbus.
+- `TenantContextFilter` corre después de `BearerTokenAuthenticationFilter` y publica `tenant_id`, `user_id` y roles en `TenantContext`.
+- Reglas por endpoint con `@PreAuthorize` y roles:
+  - `PLATFORM_ADMIN`: crear instituciones, acceso de plataforma.
+  - `TENANT_ADMIN`: administración del tenant.
+  - `OPERATOR`: clientes, cuentas y operaciones financieras.
+  - `AUDITOR`: lectura de historial, auditoría y webhooks.
+- Además del rol, los servicios validan pertenencia del recurso al tenant.
+
+## Contraseñas
+
+- Hash BCrypt con strength 12.
+- Nunca se devuelve `password_hash` en respuestas.
+- El seed demo usa `Admin123!` solo para desarrollo.
 
 ## Consideraciones de seguridad
-- No exponer si el usuario existe de forma que facilite enumeración (mensajes genéricos en fallos de login, según política).
-- Proteger contra fuerza bruta/rate limiting (pendiente de diseño/infra).
-- Registrar eventos de autenticación relevantes en auditoría (pendiente).
-- Cerrar sesión / revocación: diseño pendiente (lista de denegación, versión de token o TTL corto).
 
-## Relación con multitenancy
-- El tenant se deriva del **JWT/contexto autenticado**, no de parámetros arbitrarios del cliente.
-- Ver [Multitenancy](multitenancy.md).
+- Mensaje genérico `INVALID_CREDENTIALS` para tenant, usuario o contraseña incorrectos.
+- Login exitoso auditado en `audit_logs` con `correlation_id`.
+- **Pendiente:** rate limiting, bloqueo por intentos fallidos, refresh tokens, revocación y MFA.
+- **Pendiente:** rotación de `JWT_SECRET` sin invalidar todas las sesiones.
 
-## Estado de verificación
-Sin implementación ni pruebas; controles de autenticación **no verificables** actualmente.
+## Verificación
+
+- Prueba de integración: login real, depósito autenticado, replay idempotente y aislamiento entre tenants.
+- Ver [TransactionApiIntegrationTest](../../src/test/java/com/bankos/integration/TransactionApiIntegrationTest.java).

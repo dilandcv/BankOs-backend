@@ -1,110 +1,95 @@
 # Configuración Docker e infraestructura
 
 ## Estado
-- **Implementado:** ninguno. No existen `Dockerfile`, `docker-compose.yml`, `.env.example` ni configuración de contenedores en el repositorio.
-- **Propuesto:** ejecución independiente del backend con Docker Compose (Spring Boot + PostgreSQL + Redis), configurable por variables de entorno y sin secretos reales en el repositorio.
+
+- **Implementado:** `Dockerfile` multi-stage, `docker-compose.yml`, `.env.example`, healthchecks y ejecución como usuario no root.
+- **Servicios:** backend Spring Boot, PostgreSQL 16 y Redis 7.
+- **Pendiente:** despliegue productivo, orquestación (Kubernetes/ECS), secretos gestionados y worker separado de webhooks.
 
 ## Objetivo
-Permitir que el backend se construya, ejecute y verifique **por sí solo**, sin depender de `mobile/` ni de servicios del frontend.
 
-## Servicios (propuestos)
+Permitir que el backend se construya, ejecute y verifique **por sí solo**, sin depender de `mobile/`.
 
-| Servicio | Imagen/Build | Propósito | Estado |
+## Servicios
+
+| Servicio | Imagen/Build | Puerto por defecto | Propósito |
 |---|---|---|---|
-| `app` | Build desde `backend/Dockerfile` (o imagen Maven/JDK) | API Spring Boot | Pendiente |
-| `postgres` | `postgres` (versión a definir) | Base de datos principal | Pendiente |
-| `redis` | `redis` (versión a definir) | Caché y soporte auxiliar | Pendiente |
+| `backend` | Build `backend/Dockerfile` | `8080` | API Spring Boot |
+| `postgres` | `postgres:16-alpine` | `5432` | Base de datos principal |
+| `redis` | `redis:7-alpine` | `6379` | Caché/soporte auxiliar |
 
 ```mermaid
 flowchart LR
-  APP[app: Spring Boot] --> PG[(postgres)]
-  APP --> RD[(redis)]
-  U[Herramienta HTTP / pruebas] --> APP
+  APP[backend: Spring Boot] --> PG[(postgres:16)]
+  APP --> RD[(redis:7)]
+  U[curl/Swagger/pruebas] --> APP
 ```
 
-## Ejemplo de `docker-compose.yml` (propuesto, no implementado)
+## Ejecución
 
-```yaml
-services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
-      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      DB_USERNAME: ${POSTGRES_USER}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      JWT_SECRET: ${JWT_SECRET}
-    ports:
-      - "${APP_PORT:-8080}:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-volumes:
-  postgres_data:
+```bash
+cd backend
+cp .env.example .env
+docker compose up --build
 ```
 
-## Variables de entorno (propuestas)
+> Si el puerto `5432` está ocupado, ejecuta `DB_PORT=55432 docker compose up --build`. `DB_PORT` solo cambia el puerto publicado en el host; el backend usa `postgres:5432` dentro de la red de Compose.
 
-| Variable | Descripción | Ejemplo/nota |
+- API: `http://localhost:8080`
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+- Health: `http://localhost:8080/actuator/health`
+- El perfil `dev` carga el seed de demostración.
+
+## Dockerfile
+
+- Etapa `build`: `maven:3.9-eclipse-temurin-21`, `mvn -B -Dmaven.test.skip=true package`, con caché BuildKit para `/root/.m2`.
+- Etapa runtime: `eclipse-temurin:21-jre-alpine`.
+- Usuario no root `bankos`.
+- `HEALTHCHECK` contra `/actuator/health`.
+- `-XX:MaxRAMPercentage=75.0`.
+
+## Variables de entorno
+
+| Variable | Descripción | Default Compose |
 |---|---|---|
-| `SPRING_PROFILES_ACTIVE` | Perfil activo (`dev`, `test`, `prod`) | `dev` |
-| `APP_PORT` | Puerto expuesto de la API | `8080` |
-| `DB_URL` / `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Conexión a PostgreSQL | Sin secretos en git |
-| `REDIS_HOST` / `REDIS_PORT` | Conexión a Redis | `redis`, `6379` en Compose |
-| `JWT_SECRET` | Secreto/clave para JWT | **Solo en entorno**, fuerte y rotatable |
-| `JWT_EXPIRATION` | Expiración de tokens | Definir unidad/formato |
+| `SPRING_PROFILES_ACTIVE` | Perfil (`dev`, `test`, `prod`) | `dev` |
+| `APP_PORT` | Puerto de la API | `8080` |
+| `DB_NAME` | Base de datos | `bankos` |
+| `DB_USERNAME` | Usuario PostgreSQL | `bankos` |
+| `DB_PASSWORD` | Password PostgreSQL | `bankos` |
+| `DB_PORT` | Puerto PostgreSQL | `5432` |
+| `REDIS_HOST` / `REDIS_PORT` | Conexión Redis | `redis` / `6379` |
+| `JWT_SECRET` | Secreto HS256 | valor ficticio; **cambiar** |
+| `JWT_ISSUER` | Emisor JWT | `bankos` |
+| `JWT_EXPIRATION_MS` | Expiración access token | `3600000` |
+| `CORS_ALLOWED_ORIGINS` | Orígenes permitidos | localhost |
+| `WEBHOOK_DISPATCH_INTERVAL_MS` | Intervalo del dispatcher | `5000` |
+| `WEBHOOK_MAX_ATTEMPTS` | Intentos máximos | `8` |
+| `WEBHOOK_TIMEOUT_MS` | Timeout HTTP | `5000` |
 
-- Proveer `.env.example` con claves y valores ficticios/documentados; `.env` real debe estar ignorado por git.
-- **Nunca** incluir credenciales, secretos ni tokens reales en el repositorio.
+**Nunca** commitear `.env` real ni secretos. `.env.example` solo contiene valores ficticios.
 
-## Dockerfile (propuesto, no implementado)
-- Build multi-stage (Maven build + JRE runtime) recomendado para imagen liviana.
-- Ejecutar como usuario no root.
-- Exponer puerto de la aplicación y configurar healthcheck cuando sea viable.
+## Perfiles
 
-## Perfiles y ejecución local
-- `dev`: desarrollo local con logs detallados y dependencias locales (Compose).
-- `test`: orientado a pruebas (Testcontainers o servicios efímeros, a definir).
-- `prod`: configuración endurecida, sin valores por defecto inseguros.
+- `dev`: logs de desarrollo y seed `db/dev/V100__dev_seed.sql`.
+- `test`: solo migraciones `db/migration`; scheduling deshabilitado; Testcontainers.
+- `prod`: sin seed, `ddl-auto=validate`, secretos obligatorios por entorno.
 
-## Healthchecks y observabilidad (propuesto)
-- Healthchecks en `postgres` y `redis` para orden de arranque (`depends_on` con condición).
-- Endpoint de salud de Spring Boot Actuator (si se incluye, decisión pendiente) para verificar estado de la app y dependencias.
+## Healthchecks
 
-## Consideraciones
-- Los volúmenes persisten datos de PostgreSQL entre reinicios; definir estrategia de limpieza para entornos de prueba.
-- Redis complementa pero no reemplaza a PostgreSQL como fuente de verdad (especialmente para idempotencia/finanzas).
-- No incluir servicios ni configuración relacionados con Flutter/`mobile/`.
+- PostgreSQL: `pg_isready`.
+- Redis: `redis-cli ping`.
+- Backend: `wget -qO- http://localhost:8080/actuator/health`.
+- Compose espera `service_healthy` antes de arrancar el backend.
+
+## Persistencia
+
+- Volumen `bankos-postgres` para datos.
+- Para reiniciar limpio: `docker compose down -v` (elimina la base).
+
+## Producción (pendiente)
+
+- TLS en proxy inverso.
+- Secretos en gestor dedicado.
+- Escalar el dispatcher de webhooks fuera de la API.
+- Backups, métricas, alertas y trazas.

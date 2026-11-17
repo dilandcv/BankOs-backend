@@ -1,21 +1,20 @@
-# Contratos de API (propuestos)
+# Contratos de API
 
-## Estado y alcance
-- **Implementado:** ninguno (sin controladores ni endpoints en el repositorio).
-- **Propuesto:** contratos REST JSON bajo `/api/v1` para desarrollo y prueba independiente del backend.
-- **Nota:** estos contratos son **propuestas** hasta validarse con requisitos y la implementación real. No implican integración con `mobile/`.
+> **Estado:** contratos implementados del MVP. Cualquier cambio requiere actualizar controladores, DTOs y pruebas.
 
-## Convenciones comunes
+## Convenciones
 
 ### Encabezados
+
 ```http
-Authorization: Bearer <JWT>        # requerido en endpoints protegidos
+Authorization: Bearer <JWT>        # endpoints protegidos
 Content-Type: application/json
-X-Correlation-ID: <UUID>          # trazabilidad
-Idempotency-Key: <UNIQUE_KEY>     # requerido en operaciones financieras
+X-Correlation-ID: <UUID>          # opcional; se genera si falta
+Idempotency-Key: <UNIQUE_KEY>     # obligatorio en operaciones financieras
 ```
 
-### Envoltorio de respuesta (propuesto)
+### Sobre de respuesta
+
 ```json
 {
   "success": true,
@@ -26,150 +25,406 @@ Idempotency-Key: <UNIQUE_KEY>     # requerido en operaciones financieras
 }
 ```
 
+- JSON en `snake_case`.
+- `BigDecimal` se serializa como string (`"100.0000"`).
+- Fechas en ISO-8601 UTC (`Instant`).
+
 ## Autenticación y tenant
 
-| Método | Endpoint | Descripción | Auth | Estado |
-|---|---|---|---|---|
-| POST | `/tenants` | Registrar institución (tenant) | Público/administrativo (definir) | Propuesto |
-| POST | `/auth/login` | Iniciar sesión y emitir JWT | Público | Propuesto |
-| GET | `/auth/me` | Datos del usuario autenticado y contexto | Bearer JWT | Propuesto |
+| Método | Endpoint | Descripción | Auth |
+|---|---|---|---|
+| `POST` | `/api/v1/auth/login` | Login por institución | Público |
+| `GET` | `/api/v1/auth/me` | Usuario y tenant del token | Bearer |
+| `POST` | `/api/v1/tenants` | Crear institución | `PLATFORM_ADMIN` |
+| `GET` | `/api/v1/tenants` | Listar instituciones accesibles | `PLATFORM_ADMIN`, `TENANT_ADMIN` |
+| `GET` | `/api/v1/tenants/{id}` | Consultar institución | `PLATFORM_ADMIN`, `TENANT_ADMIN` |
 
-### Ejemplo: login (propuesto)
+### Login
+
 **Request**
+
 ```json
 {
-  "tenant": "tenant-code",
-  "username": "user@example.com",
-  "password": "********"
+  "tenant_code": "BANCO_HORIZONTE",
+  "email": "admin@horizonte.com",
+  "password": "Admin123!"
 }
 ```
-**Response `data` (ejemplo)**
+
+**Response `data`**
+
 ```json
 {
   "access_token": "<jwt>",
   "token_type": "Bearer",
-  "expires_in": 3600
+  "expires_in": 3600,
+  "user": {
+    "id": "uuid",
+    "email": "admin@horizonte.com",
+    "full_name": "Admin Banco Horizonte",
+    "role": "TENANT_ADMIN"
+  },
+  "tenant": {
+    "id": "uuid",
+    "code": "BANCO_HORIZONTE",
+    "name": "Banco Horizonte",
+    "primary_color": "#0070BA",
+    "secondary_color": "#003087",
+    "logo_url": null
+  }
 }
 ```
 
-> El mecanismo exacto de identificación de tenant en login (campo, subdominio, header) debe confirmarse; el `tenant` **nunca** debe confiarse en operaciones posteriores sin validarlo contra el contexto del JWT.
+### Crear institución
+
+**Request**
+
+```json
+{
+  "code": "BANCO_NUEVO",
+  "name": "Banco Nuevo",
+  "primary_color": "#112233",
+  "secondary_color": "#445566",
+  "logo_url": "https://cdn.example.com/logo.png"
+}
+```
+
+**Response `data`**
+
+```json
+{
+  "id": "uuid",
+  "code": "BANCO_NUEVO",
+  "name": "Banco Nuevo",
+  "status": "ACTIVE",
+  "primary_color": "#112233",
+  "secondary_color": "#445566",
+  "logo_url": "https://cdn.example.com/logo.png",
+  "created_at": "2026-11-16T12:00:00Z"
+}
+```
+
+## Usuarios
+
+| Método | Endpoint | Descripción | Roles |
+|---|---|---|---|
+| `GET` | `/api/v1/users` | Listar usuarios del tenant | `PLATFORM_ADMIN`, `TENANT_ADMIN` |
+| `POST` | `/api/v1/users` | Crear usuario | `PLATFORM_ADMIN`, `TENANT_ADMIN` |
+| `GET` | `/api/v1/users/{id}` | Consultar usuario | `PLATFORM_ADMIN`, `TENANT_ADMIN` |
+
+**Request crear**
+
+```json
+{
+  "email": "operador@banco.com",
+  "full_name": "Operador Banco",
+  "password": "Password123!",
+  "role": "OPERATOR"
+}
+```
+
+**Response `data`**
+
+```json
+{
+  "id": "uuid",
+  "email": "operador@banco.com",
+  "full_name": "Operador Banco",
+  "role": "OPERATOR",
+  "status": "ACTIVE",
+  "created_at": "2026-11-16T12:00:00Z"
+}
+```
+
+## Clientes
+
+| Método | Endpoint | Descripción | Roles |
+|---|---|---|---|
+| `GET` | `/api/v1/customers` | Listar clientes | Admin/Operador/Auditor |
+| `POST` | `/api/v1/customers` | Crear cliente | `TENANT_ADMIN`, `OPERATOR` |
+| `GET` | `/api/v1/customers/{id}` | Consultar cliente | Admin/Operador/Auditor |
+
+**Request**
+
+```json
+{
+  "document_type": "CC",
+  "document_number": "1020304050",
+  "full_name": "María González"
+}
+```
+
+**Response `data`**
+
+```json
+{
+  "id": "uuid",
+  "document_type": "CC",
+  "document_number": "1020304050",
+  "full_name": "María González",
+  "status": "ACTIVE",
+  "created_at": "2026-11-16T12:00:00Z"
+}
+```
 
 ## Cuentas
 
-| Método | Endpoint | Descripción | Estado |
+| Método | Endpoint | Descripción | Roles |
 |---|---|---|---|
-| GET | `/accounts` | Listar cuentas del tenant (paginado) | Propuesto |
-| GET | `/accounts/{id}` | Consultar cuenta por id (del tenant) | Propuesto |
-| POST | `/accounts` | Crear cuenta (admin) | Propuesto |
-| PATCH | `/accounts/{id}` | Actualizar estado/datos permitidos (admin) | Propuesto |
+| `GET` | `/api/v1/accounts` | Listar cuentas paginadas | Admin/Operador/Auditor |
+| `GET` | `/api/v1/accounts/all` | Listar todas las cuentas | Admin/Operador/Auditor |
+| `POST` | `/api/v1/accounts` | Crear cuenta | `TENANT_ADMIN`, `OPERATOR` |
+| `GET` | `/api/v1/accounts/{id}` | Consultar cuenta | Admin/Operador/Auditor |
 
-**Response `data` cuenta (ejemplo)**
+**Request crear**
+
+```json
+{
+  "customer_id": "uuid",
+  "currency": "USD"
+}
+```
+
+**Response `data`**
+
 ```json
 {
   "id": "uuid",
   "customer_id": "uuid",
-  "account_number": "000123",
+  "account_number": "0000004821",
   "currency": "USD",
-  "balance": "1000.00",
-  "status": "ACTIVE"
+  "balance": "8250.0000",
+  "status": "ACTIVE",
+  "created_at": "2026-11-16T12:00:00Z"
 }
 ```
 
 ## Transacciones
 
-| Método | Endpoint | Descripción | Idempotency-Key | Estado |
+| Método | Endpoint | Descripción | Idempotency-Key | Roles |
 |---|---|---|---|---|
-| POST | `/transactions/deposits` | Depósito en cuenta | Requerido | Propuesto |
-| POST | `/transactions/withdrawals` | Retiro de cuenta | Requerido | Propuesto |
-| POST | `/transactions/transfers/preview` | Previsualizar comisión/conversión/montos | Recomendado/definir | Propuesto |
-| POST | `/transactions/transfers` | Ejecutar transferencia | Requerido | Propuesto |
-| GET | `/transactions` | Consultar movimientos (paginado/filtrado) | No | Propuesto |
-| GET | `/transactions/{id}` | Consultar transacción | No | Propuesto |
+| `POST` | `/api/v1/transactions/deposits` | Depósito | Requerido | Admin/Operador |
+| `POST` | `/api/v1/transactions/withdrawals` | Retiro | Requerido | Admin/Operador |
+| `POST` | `/api/v1/transactions/transfers/preview` | Comisión/conversión | No | Admin/Operador/Auditor |
+| `POST` | `/api/v1/transactions/transfers` | Transferencia | Requerido | Admin/Operador |
+| `GET` | `/api/v1/transactions` | Historial paginado | No | Admin/Operador/Auditor |
+| `GET` | `/api/v1/transactions/{id}` | Detalle | No | Admin/Operador/Auditor |
 
-### Ejemplo: depósito (propuesto)
+### Depósito
+
 ```json
 {
   "account_id": "uuid",
-  "amount": "150.00",
+  "amount": "100.00",
   "currency": "USD",
-  "reference": "cash-in"
+  "description": "Depósito demo"
 }
 ```
 
-### Ejemplo: retiro (propuesto)
+### Retiro
+
 ```json
 {
   "account_id": "uuid",
   "amount": "50.00",
   "currency": "USD",
-  "reference": "atm"
+  "description": "Retiro ATM"
 }
 ```
 
-### Ejemplo: preview de transferencia (propuesto)
+### Preview de transferencia
+
+**Request**
+
 ```json
 {
   "source_account_id": "uuid",
-  "destination_account_id": "uuid",
+  "target_account_id": "uuid",
   "amount": "100.00",
   "currency": "USD"
 }
 ```
-**Response `data` (ejemplo)**
-```json
-{
-  "amount": "100.00",
-  "fee": "2.00",
-  "fee_currency": "USD",
-  "exchange_rate": "1.0000",
-  "credited_amount": "100.00",
-  "credited_currency": "USD",
-  "total_debit": "102.00"
-}
-```
 
-### Ejemplo: transferencia (propuesto)
+**Response `data`**
+
 ```json
 {
   "source_account_id": "uuid",
-  "destination_account_id": "uuid",
-  "amount": "100.00",
-  "currency": "USD",
-  "reference": "invoice-123"
+  "target_account_id": "uuid",
+  "amount": "100.0000",
+  "source_currency": "USD",
+  "target_currency": "EUR",
+  "exchange_rate": "0.92000000",
+  "fee": "1.5000",
+  "debit_amount": "101.5000",
+  "credit_amount": "92.0000"
 }
 ```
 
-**Reglas propuestas:** comisión se descuenta de la cuenta origen; la conversión se aplica al monto transferido (no a la comisión); tasas configuradas por tenant. Validar pertenencia al tenant, estados, saldo y ejecutar de forma atómica.
+### Transferencia
 
-## Recursos administrativos (propuestos)
+```json
+{
+  "source_account_id": "uuid",
+  "target_account_id": "uuid",
+  "amount": "100.00",
+  "currency": "USD",
+  "description": "Pago factura"
+}
+```
 
-| Recurso | Endpoints (ejemplos) | Descripción | Estado |
+**Response `data` de operación financiera**
+
+```json
+{
+  "id": "uuid",
+  "type": "TRANSFER",
+  "status": "COMPLETED",
+  "amount": "100.0000",
+  "currency": "USD",
+  "fee": "1.5000",
+  "exchange_rate": "0.92000000",
+  "source_account_id": "uuid",
+  "destination_account_id": "uuid",
+  "description": "Pago factura",
+  "correlation_id": "uuid",
+  "created_at": "2026-11-16T12:00:00Z",
+  "entries": [
+    {
+      "id": "uuid",
+      "account_id": "uuid",
+      "direction": "DEBIT",
+      "amount": "101.5000",
+      "currency": "USD",
+      "created_at": "2026-11-16T12:00:00Z"
+    },
+    {
+      "id": "uuid",
+      "account_id": "uuid",
+      "direction": "CREDIT",
+      "amount": "92.0000",
+      "currency": "EUR",
+      "created_at": "2026-11-16T12:00:00Z"
+    }
+  ]
+}
+```
+
+**Reglas implementadas**
+
+- El `tenant_id` de origen y destino se toma del JWT; no se acepta en el body.
+- La comisión se descuenta de la cuenta origen.
+- La conversión se aplica al monto transferido, no a la comisión.
+- La tasa se resuelve por tenant; si no existe, `EXCHANGE_RATE_NOT_FOUND`.
+- Saldo insuficiente, cuenta inactiva/bloqueada y moneda incorrecta se rechazan.
+- Bloqueo pesimista con orden determinista de cuentas.
+- La misma `Idempotency-Key` + mismo body devuelve la respuesta original; body distinto devuelve `409 IDEMPOTENCY_CONFLICT`.
+
+### Historial
+
+```http
+GET /api/v1/transactions?page=0&size=20&accountId=uuid&type=DEPOSIT&from=2026-01-01T00:00:00Z&to=2026-12-31T23:59:59Z
+```
+
+## Configuración y tasas
+
+| Método | Endpoint | Descripción | Roles |
 |---|---|---|---|
-| Usuarios | `GET/POST /users`, `GET/PATCH /users/{id}` | Gestión de usuarios, roles y permisos | Propuesto |
-| Clientes | `GET/POST /customers`, `GET/PATCH /customers/{id}` | Gestión de clientes | Propuesto |
-| Cuentas (admin) | `POST/PATCH /accounts` | Alta y cambios de estado | Propuesto |
-| Configuraciones | `GET/PUT /settings` o por claves | Parámetros y comisiones por tenant | Propuesto |
-| Tasas de cambio | `GET/POST /exchange-rates` | Gestión de tasas por tenant | Propuesto |
-| Auditoría | `GET /audit-logs` | Consulta de trazabilidad (solo lectura) | Propuesto |
-| Webhooks | `GET/POST/PATCH /webhooks`, entregas/reintentos | Configuración y observabilidad de entregas | Propuesto |
+| `GET` | `/api/v1/settings` | Configuración del tenant | Admin/Operador/Auditor |
+| `PUT` | `/api/v1/settings` | Actualizar claves | Admin |
+| `GET` | `/api/v1/settings/exchange-rates` | Listar tasas | Admin/Operador/Auditor |
+| `GET` | `/api/v1/settings/exchange-rates/{id}` | Consultar tasa | Admin/Operador/Auditor |
+| `POST` | `/api/v1/settings/exchange-rates` | Crear tasa | Admin |
 
-> Rutas y permisos exactos (RBAC) deben definirse al implementar.
+**Request settings**
 
-## Paginación (propuesta)
-Parámetros sugeridos: `page`, `size`, `sort`, `from`, `to`, `status`.
+```json
+{
+  "settings": {
+    "transfer.fee.fixed": "1.5000",
+    "transfer.fee.percent": "0.5000"
+  }
+}
+```
+
+`transfer.fee.percent` se interpreta como porcentaje (ej. `0.5` = 0.5%).
+
+**Request tasa**
+
+```json
+{
+  "from_currency": "USD",
+  "to_currency": "EUR",
+  "rate": "0.92000000",
+  "effective_from": "2026-01-01T00:00:00Z",
+  "effective_to": null
+}
+```
+
+## Auditoría
+
+| Método | Endpoint | Descripción | Roles |
+|---|---|---|---|
+| `GET` | `/api/v1/audit-logs` | Listar auditoría del tenant | Admin/Auditor |
+| `GET` | `/api/v1/audit-logs/{id}` | Detalle | Admin/Auditor |
+
+**Response `data`**
+
+```json
+{
+  "id": "uuid",
+  "actor_user_id": "uuid",
+  "action": "TRANSACTION_DEPOSIT",
+  "resource_type": "TRANSACTION",
+  "resource_id": "uuid",
+  "metadata": "{\"amount\":\"100.0000\"}",
+  "correlation_id": "uuid",
+  "created_at": "2026-11-16T12:00:00Z"
+}
+```
+
+## Webhooks
+
+| Método | Endpoint | Descripción | Roles |
+|---|---|---|---|
+| `GET` | `/api/v1/webhooks` | Listar configuraciones | Admin/Auditor |
+| `POST` | `/api/v1/webhooks` | Crear webhook | Admin |
+| `GET` | `/api/v1/webhooks/events` | Listar outbox | Admin/Auditor |
+
+**Request crear webhook**
+
+```json
+{
+  "url": "https://example.com/bankos/events",
+  "events": "transaction.completed",
+  "secret": "super-secret-at-least-16"
+}
+```
+
+- El secreto no se devuelve en respuestas.
+- Entrega con `X-BankOS-Event` y `X-BankOS-Signature: sha256=<hmac>`.
+- Reintentos exponenciales; estado final `DEAD`.
+
+## Paginación
+
 ```json
 {
   "items": [],
   "page": 0,
   "size": 20,
-  "total_items": 0,
+  "total_elements": 0,
   "total_pages": 0
 }
 ```
 
-## Validaciones y errores (propuestos)
-- 400: errores de formato/validación (`data` puede incluir detalle por campo).
-- 401/403: autenticación/autorización/tenant inválido.
-- 404: recurso inexistente o no perteneciente al tenant.
-- 409: conflicto de estado, duplicado o idempotencia (misma clave, payload distinto o en proceso, según diseño).
-- Ver [Manejo de errores](error-handling.md) para catálogo y ejemplos.
+## Errores
+
+- `400 VALIDATION_ERROR`: validación de campos o header faltante.
+- `401 UNAUTHORIZED`: token ausente/inválido/expirado.
+- `403 FORBIDDEN`: rol insuficiente.
+- `404 *_NOT_FOUND`: recurso inexistente o de otro tenant.
+- `409 CONFLICT` / `IDEMPOTENCY_CONFLICT`: duplicado o cuerpo distinto con la misma llave.
+- `422` reglas de negocio (`INSUFFICIENT_FUNDS`, `CURRENCY_MISMATCH`, `ACCOUNT_INACTIVE`, `EXCHANGE_RATE_NOT_FOUND`).
+- `500 INTERNAL_ERROR`.
+
+Ver [Manejo de errores](error-handling.md).
