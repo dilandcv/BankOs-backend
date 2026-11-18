@@ -25,9 +25,11 @@ Idempotency-Key: <UNIQUE_KEY>     # obligatorio en operaciones financieras
 }
 ```
 
-- JSON en `snake_case`.
+- JSON en `snake_case` para cuerpos y respuestas de DTO.
+- Excepción: en `400 VALIDATION_ERROR`, las claves de `data` usan el nombre del campo Java (`camelCase`, p. ej. `accountId`, `sourceAccountId`, `tenantCode`), porque `GlobalExceptionHandler` toma `FieldError.getField()`. Los clientes deben leer esas claves tal cual.
 - `BigDecimal` se serializa como string (`"100.0000"`).
 - Fechas en ISO-8601 UTC (`Instant`).
+- Roles: `PLATFORM_ADMIN`, `TENANT_ADMIN`, `OPERATOR`, `AUDITOR`. En las tablas, “Admin” = `PLATFORM_ADMIN` + `TENANT_ADMIN`; “Admin/Operador/Auditor” = los cuatro roles.
 
 ## Autenticación y tenant
 
@@ -389,7 +391,7 @@ GET /api/v1/transactions?page=0&size=20&accountId=uuid&type=DEPOSIT&from=2026-01
 |---|---|---|---|
 | `GET` | `/api/v1/webhooks` | Listar configuraciones | Admin/Auditor |
 | `POST` | `/api/v1/webhooks` | Crear webhook | Admin |
-| `GET` | `/api/v1/webhooks/events` | Listar outbox | Admin/Auditor |
+| `GET` | `/api/v1/webhooks/events` | Listar outbox (paginado) | Admin/Auditor |
 
 **Request crear webhook**
 
@@ -402,6 +404,7 @@ GET /api/v1/transactions?page=0&size=20&accountId=uuid&type=DEPOSIT&from=2026-01
 ```
 
 - El secreto no se devuelve en respuestas.
+- `GET /webhooks` devuelve un array; `GET /webhooks/events` devuelve una [respuesta paginada](#paginación).
 - Entrega con `X-BankOS-Event` y `X-BankOS-Signature: sha256=<hmac>`.
 - Reintentos exponenciales; estado final `DEAD`.
 
@@ -419,12 +422,14 @@ GET /api/v1/transactions?page=0&size=20&accountId=uuid&type=DEPOSIT&from=2026-01
 
 ## Errores
 
-- `400 VALIDATION_ERROR`: validación de campos o header faltante.
+- `400 VALIDATION_ERROR`: validación de campos o header faltante. `data` es un mapa `{campoJava: mensaje}` con claves camelCase, p. ej. `{"accountId": "must not be null"}`.
 - `401 UNAUTHORIZED`: token ausente/inválido/expirado.
 - `403 FORBIDDEN`: rol insuficiente.
-- `404 *_NOT_FOUND`: recurso inexistente o de otro tenant.
+- `404 *_NOT_FOUND`: recurso inexistente o de otro tenant. Excepción: `GET /api/v1/settings/exchange-rates/{id}` responde `409 CONFLICT` con mensaje «Tasa de cambio no encontrada» (`SettingsService.getExchangeRate`).
 - `409 CONFLICT` / `IDEMPOTENCY_CONFLICT`: duplicado o cuerpo distinto con la misma llave.
 - `422` reglas de negocio (`INSUFFICIENT_FUNDS`, `CURRENCY_MISMATCH`, `ACCOUNT_INACTIVE`, `EXCHANGE_RATE_NOT_FOUND`).
 - `500 INTERNAL_ERROR`.
+
+> **Discrepancia conocida (2026-11-17):** una denegación por `@PreAuthorize` lanza `AuthorizationDeniedException` (Spring Security 6.5), que el `@ExceptionHandler(Exception.class)` de `GlobalExceptionHandler` convierte en `500 INTERNAL_ERROR` en lugar de `403 FORBIDDEN`. Reproducido con `POST /tenants` usando un `TENANT_ADMIN`. El cliente móvil previene estas llamadas con guards de rol; el comportamiento del backend no se modificó en el plan de integración móvil.
 
 Ver [Manejo de errores](error-handling.md).
