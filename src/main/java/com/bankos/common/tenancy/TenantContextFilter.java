@@ -35,11 +35,23 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
                 Set<Role> parsedRoles = roles == null
                         ? Set.of()
-                        : roles.stream().map(Role::valueOf).collect(Collectors.toSet());
+                        : roles.stream()
+                                .map(r -> {
+                                    try {
+                                        return Role.valueOf(r);
+                                    } catch (IllegalArgumentException e) {
+                                        return null;
+                                    }
+                                })
+                                .filter(java.util.Objects::nonNull)
+                                .collect(Collectors.toSet());
+
+                UUID parsedTenantId = (tenantId != null && !tenantId.isBlank()) ? UUID.fromString(tenantId) : null;
+                UUID userId = UUID.fromString(jwtAuthentication.getToken().getSubject());
 
                 TenantContext.set(new TenantContext.Principal(
-                        UUID.fromString(tenantId),
-                        UUID.fromString(jwtAuthentication.getToken().getSubject()),
+                        parsedTenantId,
+                        userId,
                         email,
                         parsedRoles
                 ));

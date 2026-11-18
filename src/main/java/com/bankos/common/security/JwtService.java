@@ -1,5 +1,7 @@
 package com.bankos.common.security;
 
+import com.bankos.modules.tenants.entity.Tenant;
+import com.bankos.modules.users.entity.MasterUser;
 import com.bankos.modules.users.entity.Role;
 import com.bankos.modules.users.entity.User;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -41,6 +43,47 @@ public class JwtService {
                 .claim("tenant_id", user.getTenantId().toString())
                 .claim("email", user.getEmail())
                 .claim("roles", roles)
+                .build();
+
+        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
+        String token = encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+        return new IssuedToken(token, expiresAt, properties.expirationMs() / 1000);
+    }
+
+    public IssuedToken issueMaster(MasterUser masterUser) {
+        Instant now = Instant.now();
+        Instant expiresAt = now.plusMillis(properties.expirationMs());
+
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(properties.issuer())
+                .subject(masterUser.getId().toString())
+                .issuedAt(now)
+                .expiresAt(expiresAt)
+                .id(UUID.randomUUID().toString())
+                .claim("email", masterUser.getEmail())
+                .claim("roles", List.of("PLATFORM_USER"))
+                .claim("type", "MASTER")
+                .build();
+
+        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
+        String token = encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+        return new IssuedToken(token, expiresAt, properties.expirationMs() / 1000);
+    }
+
+    public IssuedToken issueTenant(MasterUser masterUser, Tenant tenant, List<String> roles) {
+        Instant now = Instant.now();
+        Instant expiresAt = now.plusMillis(properties.expirationMs());
+
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(properties.issuer())
+                .subject(masterUser.getId().toString())
+                .issuedAt(now)
+                .expiresAt(expiresAt)
+                .id(UUID.randomUUID().toString())
+                .claim("tenant_id", tenant.getId().toString())
+                .claim("email", masterUser.getEmail())
+                .claim("roles", roles)
+                .claim("type", "TENANT")
                 .build();
 
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
