@@ -1,0 +1,26 @@
+# Target build directory
+target/
+*.class
+
+# IDE and Editors
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# Environment and Secrets
+.env
+*.env.local
+*.pem
+*.key
+*.jks
+
+# Logs
+*.log
+logs/
+
+# OS metadata
+.DS_Store
+Thumbs.db
