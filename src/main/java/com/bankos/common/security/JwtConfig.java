@@ -5,10 +5,11 @@ import com.nimbusds.jose.proc.SecurityContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
@@ -45,8 +46,19 @@ public class JwtConfig {
 
         OAuth2TokenValidator<Jwt> issuerValidator =
                 JwtValidators.createDefaultWithIssuer(properties.issuer());
-        OAuth2TokenValidator<Jwt> tenantValidator =
-                new JwtClaimValidator<>("tenant_id", value -> value != null && !value.toString().isBlank());
+        OAuth2TokenValidator<Jwt> tenantValidator = jwt -> {
+            String type = jwt.getClaimAsString("type");
+            if ("MASTER".equalsIgnoreCase(type)) {
+                return OAuth2TokenValidatorResult.success();
+            }
+            String tenantId = jwt.getClaimAsString("tenant_id");
+            if (tenantId != null && !tenantId.isBlank()) {
+                return OAuth2TokenValidatorResult.success();
+            }
+            return OAuth2TokenValidatorResult.failure(
+                    new OAuth2Error("invalid_token", "El claim tenant_id es requerido para este token", null)
+            );
+        };
 
         decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(issuerValidator, tenantValidator));
         return decoder;
