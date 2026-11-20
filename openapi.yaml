@@ -242,6 +242,36 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiResponseTenantResponse"
+  /api/v1/tenants/{id}/logo:
+    post:
+      tags:
+      - tenant-controller
+      operationId: uploadLogo
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+              - file
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseTenantResponse"
   /api/v1/settings/exchange-rates:
     get:
       tags:
@@ -306,6 +336,48 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiResponseCustomerResponse"
+  /api/v1/cards:
+    get:
+      tags:
+      - card-controller
+      operationId: list_4
+      parameters:
+      - name: accountId
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: customerId
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseListCardResponse"
+    post:
+      tags:
+      - card-controller
+      operationId: create_4
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCardRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseCardResponse"
   /api/v1/banks/link:
     post:
       tags:
@@ -324,6 +396,24 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiResponseLinkedBankResponse"
+  /api/v1/auth/register:
+    post:
+      tags:
+      - auth-controller
+      operationId: register
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseLoginResponse"
   /api/v1/auth/login:
     post:
       tags:
@@ -364,7 +454,7 @@ paths:
     get:
       tags:
       - account-controller
-      operationId: list_4
+      operationId: list_5
       parameters:
       - name: pageable
         in: query
@@ -381,7 +471,7 @@ paths:
     post:
       tags:
       - account-controller
-      operationId: create_4
+      operationId: create_5
       requestBody:
         content:
           application/json:
@@ -414,6 +504,56 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiResponseVoid"
+  /api/v1/tenants/{id}/branding:
+    patch:
+      tags:
+      - tenant-controller
+      operationId: updateBranding
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBrandingRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseTenantResponse"
+  /api/v1/cards/{id}/status:
+    patch:
+      tags:
+      - card-controller
+      operationId: updateStatus
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCardStatusRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseCardResponse"
   /api/v1/webhooks/events:
     get:
       tags:
@@ -542,6 +682,18 @@ paths:
             '*/*':
               schema:
                 $ref: "#/components/schemas/ApiResponseTenantResponse"
+  /api/v1/tenants/public:
+    get:
+      tags:
+      - tenant-controller
+      operationId: listPublic
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiResponseListTenantSummary"
   /api/v1/settings/exchange-rates/{id}:
     get:
       tags:
@@ -608,7 +760,7 @@ paths:
     get:
       tags:
       - audit-controller
-      operationId: list_5
+      operationId: list_6
       parameters:
       - name: pageable
         in: query
@@ -1237,6 +1389,77 @@ components:
         createdAt:
           type: string
           format: date-time
+    CreateCardRequest:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        cardholderName:
+          type: string
+        cardType:
+          type: string
+          enum:
+          - DEBIT
+          - CREDIT
+      required:
+      - accountId
+    ApiResponseCardResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/CardResponse"
+        correlationId:
+          type: string
+    CardResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        cardNumber:
+          type: string
+        cardholderName:
+          type: string
+        expirationDate:
+          type: string
+        cvvMasked:
+          type: string
+        cardType:
+          type: string
+          enum:
+          - DEBIT
+          - CREDIT
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - BLOCKED
+          - EXPIRED
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     LinkBankRequest:
       type: object
       properties:
@@ -1256,24 +1479,35 @@ components:
           type: string
       required:
       - tenantCode
-    LoginRequest:
+    RegisterRequest:
       type: object
       properties:
         tenantCode:
           type: string
-          maxLength: 50
-          minLength: 0
+          minLength: 1
         email:
           type: string
-          maxLength: 255
-          minLength: 0
+          minLength: 1
         password:
           type: string
-          maxLength: 100
-          minLength: 0
+          maxLength: 2147483647
+          minLength: 8
+        fullName:
+          type: string
+          minLength: 1
+        documentType:
+          type: string
+          minLength: 1
+        documentNumber:
+          type: string
+          minLength: 1
       required:
+      - documentNumber
+      - documentType
       - email
+      - fullName
       - password
+      - tenantCode
     ApiResponseLoginResponse:
       type: object
       properties:
@@ -1352,6 +1586,24 @@ components:
           - TENANT_ADMIN
           - OPERATOR
           - AUDITOR
+    LoginRequest:
+      type: object
+      properties:
+        tenantCode:
+          type: string
+          maxLength: 50
+          minLength: 0
+        email:
+          type: string
+          maxLength: 255
+          minLength: 0
+        password:
+          type: string
+          maxLength: 100
+          minLength: 0
+      required:
+      - email
+      - password
     ExchangeTokenRequest:
       type: object
       properties:
@@ -1446,6 +1698,30 @@ components:
         data: {}
         correlationId:
           type: string
+    UpdateBrandingRequest:
+      type: object
+      properties:
+        primaryColor:
+          type: string
+          pattern: "^#([A-Fa-f0-9]{6})$"
+        secondaryColor:
+          type: string
+          pattern: "^#([A-Fa-f0-9]{6})$"
+        logoUrl:
+          type: string
+          maxLength: 1000
+          minLength: 0
+    UpdateCardStatusRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - BLOCKED
+          - EXPIRED
+      required:
+      - status
     ApiResponseListWebhookResponse:
       type: object
       properties:
@@ -1629,6 +1905,21 @@ components:
             $ref: "#/components/schemas/TenantResponse"
         correlationId:
           type: string
+    ApiResponseListTenantSummary:
+      type: object
+      properties:
+        success:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantSummary"
+        correlationId:
+          type: string
     ApiResponseListExchangeRateResponse:
       type: object
       properties:
@@ -1676,6 +1967,21 @@ components:
         totalPages:
           type: integer
           format: int32
+    ApiResponseListCardResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CardResponse"
+        correlationId:
+          type: string
     ApiResponseListAvailableBankResponse:
       type: object
       properties:

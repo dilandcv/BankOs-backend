@@ -124,8 +124,20 @@ class OpenApiExportIntegrationTest {
         assertThat(yamlContent).contains("openapi: 3.");
         assertThat(yamlContent).contains("/api/v1/auth/login");
 
-        Path targetPath = Paths.get("/workspace/openapi.yaml");
+        Path targetPath = Paths.get("openapi.yaml");
+        if (!Files.exists(targetPath) && Files.exists(Paths.get("/workspace/openapi.yaml"))) {
+            targetPath = Paths.get("/workspace/openapi.yaml");
+        }
         Files.writeString(targetPath, yamlContent);
         System.out.println(">>> OpenAPI YAML exportado exitosamente a: " + targetPath.toAbsolutePath() + " (longitud: " + yamlContent.length() + " caracteres)");
+
+        java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+        byte[] hashBytes = digest.digest(Files.readAllBytes(targetPath));
+        String sha256 = java.util.HexFormat.of().formatHex(hashBytes);
+
+        Path shaPath = Paths.get("openapi.sha256");
+        if (Files.exists(shaPath)) {
+            Files.writeString(shaPath, sha256 + "  backend/openapi.yaml\n");
+        }
     }
 }

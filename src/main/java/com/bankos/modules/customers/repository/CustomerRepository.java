@@ -12,6 +12,10 @@ public interface CustomerRepository extends JpaRepository<Customer, UUID> {
 
     Optional<Customer> findByIdAndTenantId(UUID id, UUID tenantId);
 
+    Optional<Customer> findByTenantIdAndUserId(UUID tenantId, UUID userId);
+
+    Optional<Customer> findByTenantIdAndDocumentNumber(UUID tenantId, String documentNumber);
+
     Page<Customer> findAllByTenantId(UUID tenantId, Pageable pageable);
 
     boolean existsByTenantIdAndDocumentNumber(UUID tenantId, String documentNumber);

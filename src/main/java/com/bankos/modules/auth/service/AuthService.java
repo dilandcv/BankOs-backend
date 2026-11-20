@@ -2,15 +2,26 @@ package com.bankos.modules.auth.service;
 
 import com.bankos.common.exception.ApiException;
 import com.bankos.common.exception.ErrorCode;
+import com.bankos.common.money.MoneyUtils;
 import com.bankos.common.security.JwtService;
 import com.bankos.common.tenancy.TenantContext;
+import com.bankos.modules.accounts.entity.Account;
+import com.bankos.modules.accounts.entity.AccountStatus;
+import com.bankos.modules.accounts.repository.AccountRepository;
 import com.bankos.modules.audit.service.AuditService;
 import com.bankos.modules.auth.dto.LoginRequest;
 import com.bankos.modules.auth.dto.LoginResponse;
 import com.bankos.modules.auth.dto.MeResponse;
+import com.bankos.modules.auth.dto.RegisterRequest;
 import com.bankos.modules.banks.dto.LinkedBankResponse;
 import com.bankos.modules.banks.dto.MasterUserSummary;
 import com.bankos.modules.banks.service.BankLinkService;
+import com.bankos.modules.cards.entity.Card;
+import com.bankos.modules.cards.entity.CardType;
+import com.bankos.modules.cards.service.CardService;
+import com.bankos.modules.customers.entity.Customer;
+import com.bankos.modules.customers.entity.CustomerStatus;
+import com.bankos.modules.customers.repository.CustomerRepository;
 import com.bankos.modules.tenants.dto.TenantSummary;
 import com.bankos.modules.tenants.entity.Tenant;
 import com.bankos.modules.tenants.entity.TenantStatus;
@@ -28,6 +39,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.security.SecureRandom;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -40,15 +53,22 @@ public class AuthService {
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final MasterUserRepository masterUserRepository;
+    private final CustomerRepository customerRepository;
+    private final AccountRepository accountRepository;
+    private final CardService cardService;
     private final BankLinkService bankLinkService;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuditService auditService;
+    private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(
             TenantRepository tenantRepository,
             UserRepository userRepository,
             MasterUserRepository masterUserRepository,
+            CustomerRepository customerRepository,
+            AccountRepository accountRepository,
+            CardService cardService,
             BankLinkService bankLinkService,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
@@ -57,10 +77,115 @@ public class AuthService {
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.masterUserRepository = masterUserRepository;
+        this.customerRepository = customerRepository;
+        this.accountRepository = accountRepository;
+        this.cardService = cardService;
         this.bankLinkService = bankLinkService;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.auditService = auditService;
+    }
+
+    @Transactional
+    public LoginResponse register(RegisterRequest request) {
+        String tenantCode = request.tenantCode().trim().toUpperCase(Locale.ROOT);
+        Tenant tenant = tenantRepository.findByCode(tenantCode)
+                .filter(t -> t.getStatus() == TenantStatus.ACTIVE)
+                .orElseThrow(() -> new ApiException(ErrorCode.TENANT_NOT_FOUND, "Institución no encontrada o inactiva"));
+
+        String email = request.email().trim().toLowerCase(Locale.ROOT);
+        if (userRepository.existsByTenantIdAndEmail(tenant.getId(), email)) {
+            throw new ApiException(ErrorCode.CONFLICT, "Ya existe un usuario con este correo en la institución");
+        }
+
+        String documentNumber = request.documentNumber().trim();
+        if (customerRepository.existsByTenantIdAndDocumentNumber(tenant.getId(), documentNumber)) {
+            throw new ApiException(ErrorCode.CONFLICT, "Ya existe un cliente registrado con este documento en la institución");
+        }
+
+        // 1. Crear User en el tenant con rol OPERATOR
+        User user = new User();
+        user.setTenantId(tenant.getId());
+        user.setEmail(email);
+        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user.setFullName(request.fullName().trim());
+        user.setRole(Role.OPERATOR);
+        user.setStatus(UserStatus.ACTIVE);
+        User savedUser = userRepository.save(user);
+
+        // 2. Crear Customer asociado
+        Customer customer = new Customer();
+        customer.setTenantId(tenant.getId());
+        customer.setUserId(savedUser.getId());
+        customer.setDocumentType(request.documentType().trim().toUpperCase(Locale.ROOT));
+        customer.setDocumentNumber(documentNumber);
+        customer.setFullName(request.fullName().trim());
+        customer.setStatus(CustomerStatus.ACTIVE);
+        Customer savedCustomer = customerRepository.save(customer);
+
+        // 3. Crear Account de ahorros con saldo de bienvenida
+        String currency = "BANCO_HORIZONTE".equalsIgnoreCase(tenantCode) || "PAYPAL".equalsIgnoreCase(tenantCode)
+                ? "USD"
+                : "COP";
+        BigDecimal welcomeBalance = "USD".equals(currency)
+                ? MoneyUtils.money(new BigDecimal("1000.0000"))
+                : MoneyUtils.money(new BigDecimal("100000.0000"));
+
+        Account account = new Account();
+        account.setTenantId(tenant.getId());
+        account.setCustomerId(savedCustomer.getId());
+        account.setAccountNumber(generateUniqueAccountNumber(tenant.getId()));
+        account.setCurrency(currency);
+        account.setBalance(welcomeBalance);
+        account.setStatus(AccountStatus.ACTIVE);
+        Account savedAccount = accountRepository.save(account);
+
+        // 4. Emitir primera tarjeta digital
+        Card initialCard = cardService.issueInitialCard(
+                tenant.getId(),
+                savedAccount.getId(),
+                savedCustomer.getId(),
+                savedCustomer.getFullName(),
+                CardType.DEBIT,
+                savedUser.getId()
+        );
+
+        // 5. Registrar auditoría de registro
+        auditService.record(
+                tenant.getId(),
+                savedUser.getId(),
+                "USER_REGISTERED",
+                "USER",
+                savedUser.getId(),
+                Map.of(
+                        "email", savedUser.getEmail(),
+                        "tenant_code", tenant.getCode(),
+                        "account_id", savedAccount.getId().toString(),
+                        "customer_id", savedCustomer.getId().toString(),
+                        "card_id", initialCard.getId().toString()
+                )
+        );
+
+        // 6. Emitir JWT y devolver LoginResponse
+        JwtService.IssuedToken issuedToken = jwtService.issue(savedUser);
+        return new LoginResponse(
+                issuedToken.token(),
+                "Bearer",
+                issuedToken.expiresInSeconds(),
+                UserMapper.toSummary(savedUser),
+                TenantMapper.toSummary(tenant)
+        );
+    }
+
+    private String generateUniqueAccountNumber(UUID tenantId) {
+        for (int attempt = 0; attempt < 25; attempt++) {
+            long value = secureRandom.nextLong(1_000_000_000L, 10_000_000_000L);
+            String candidate = Long.toString(value);
+            if (!accountRepository.existsByTenantIdAndAccountNumber(tenantId, candidate)) {
+                return candidate;
+            }
+        }
+        throw new ApiException(ErrorCode.INTERNAL_ERROR, "No se pudo generar un número de cuenta único");
     }
 
     @Transactional

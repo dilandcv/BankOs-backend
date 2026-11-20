@@ -23,7 +23,7 @@ public class Tenant extends BaseEntity {
     @Column(name = "secondary_color", length = 7)
     private String secondaryColor;
 
-    @Column(name = "logo_url", length = 500)
+    @Column(name = "logo_url", length = 1000)
     private String logoUrl;
 
     @Enumerated(EnumType.STRING)
