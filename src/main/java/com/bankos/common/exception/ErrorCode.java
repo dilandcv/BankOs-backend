@@ -15,6 +15,7 @@ public enum ErrorCode {
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "Usuario no encontrado"),
     CUSTOMER_NOT_FOUND(HttpStatus.NOT_FOUND, "Cliente no encontrado"),
     ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "Cuenta no encontrada"),
+    CARD_NOT_FOUND(HttpStatus.NOT_FOUND, "Tarjeta no encontrada"),
     TRANSACTION_NOT_FOUND(HttpStatus.NOT_FOUND, "Transacción no encontrada"),
     AUDIT_LOG_NOT_FOUND(HttpStatus.NOT_FOUND, "Registro de auditoría no encontrado"),
     WEBHOOK_NOT_FOUND(HttpStatus.NOT_FOUND, "Configuración de webhook no encontrada"),

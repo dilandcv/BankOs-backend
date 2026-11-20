@@ -4,6 +4,7 @@ import com.bankos.common.response.ApiResponse;
 import com.bankos.modules.auth.dto.LoginRequest;
 import com.bankos.modules.auth.dto.LoginResponse;
 import com.bankos.modules.auth.dto.MeResponse;
+import com.bankos.modules.auth.dto.RegisterRequest;
 import com.bankos.modules.auth.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,6 +29,15 @@ public class AuthController {
                 "LOGIN_SUCCESS",
                 "Sesión iniciada correctamente",
                 authService.login(request)
+        );
+    }
+
+    @PostMapping("/register")
+    public ApiResponse<LoginResponse> register(@Valid @RequestBody RegisterRequest request) {
+        return ApiResponse.success(
+                "REGISTER_SUCCESS",
+                "Usuario y cliente registrados correctamente",
+                authService.register(request)
         );
     }
 

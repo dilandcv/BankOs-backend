@@ -11,4 +11,6 @@ public interface TenantRepository extends JpaRepository<Tenant, UUID> {
     Optional<Tenant> findByCode(String code);
 
     boolean existsByCode(String code);
+
+    java.util.List<Tenant> findAllByStatusOrderByNameAsc(com.bankos.modules.tenants.entity.TenantStatus status);
 }

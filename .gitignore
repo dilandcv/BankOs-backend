@@ -24,3 +24,9 @@ logs/
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Uploaded assets
+uploads/**
+!uploads/logos/.gitkeep
+
+

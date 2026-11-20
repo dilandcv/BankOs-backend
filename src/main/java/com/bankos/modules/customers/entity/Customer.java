@@ -20,9 +20,20 @@ public class Customer extends TenantScopedEntity {
     @Column(name = "full_name", nullable = false, length = 150)
     private String fullName;
 
+    @Column(name = "user_id")
+    private java.util.UUID userId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private CustomerStatus status = CustomerStatus.ACTIVE;
+
+    public java.util.UUID getUserId() {
+        return userId;
+    }
+
+    public void setUserId(java.util.UUID userId) {
+        this.userId = userId;
+    }
 
     public String getDocumentType() {
         return documentType;
